@@ -1,7 +1,7 @@
 'use client';
 
-import { Suspense, useEffect, useRef } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Suspense, useRef } from 'react';
+import { Canvas } from '@react-three/fiber';
 import {
   Environment,
   Lightformer,
@@ -16,6 +16,7 @@ import {
 import { BlendFunction } from 'postprocessing';
 import * as THREE from 'three';
 import CarModel from './CarModel';
+import ScrollChoreography from './ScrollChoreography';
 import type { CarRig } from './useCarMaterials';
 
 /**
@@ -55,10 +56,9 @@ export default function Scene() {
             resolution={1024}
           />
           <Grade />
+          {/* the master scroll-scrubbed cinematic: drives camera + CarRig */}
+          <ScrollChoreography carRef={carRef} />
         </Suspense>
-
-        {/* DEV-ONLY harness — removed in the M3 choreography milestone. */}
-        <DevHarness carRef={carRef} />
       </Canvas>
     </div>
   );
@@ -175,114 +175,4 @@ function Grade() {
       />
     </EffectComposer>
   );
-}
-
-// ---------------------------------------------------------------------------
-// DEV-ONLY verification harness. REMOVE in M3 (choreography owns these values).
-//
-//   ?stage=wire|clay|gloss|lights   set an act (instant on load)
-//   ?cam=default|front|rear|side     camera preset
-//   ?instant=1                       snap instead of easing
-//   keys 1/2/3/4                      wire / clay / gloss / lights (eased)
-//   keys 5/6/7/8                      camera default / front / rear / side
-// ---------------------------------------------------------------------------
-type Stage = 'wire' | 'clay' | 'gloss' | 'lights';
-const STAGE_BLEND: Record<Stage, [number, number, number]> = {
-  // [wireframeToClay, clayToGloss, lights]
-  wire: [0, 0, 0],
-  clay: [1, 0, 0],
-  gloss: [1, 1, 0],
-  lights: [1, 1, 1],
-};
-const CAM_PRESETS: Record<string, [THREE.Vector3Tuple, THREE.Vector3Tuple]> = {
-  // [position, lookAt]
-  default: [[4.6, 1.25, 4.9], [0, 0.35, 0]],
-  front: [[2.9, 0.82, -5.2], [0, 0.52, 0]],
-  rear: [[4.6, 1.2, 5.2], [0, 0.5, 0]],
-  side: [[7.2, 1.0, 0.4], [0, 0.4, 0]],
-};
-
-function DevHarness({ carRef }: { carRef: React.RefObject<CarRig | null> }) {
-  const { camera } = useThree();
-  const cur = useRef<[number, number, number]>([1, 1, 0]);
-  const target = useRef<[number, number, number]>([1, 1, 0]);
-  const snap = useRef(false);
-  const camTarget = useRef<{ pos: THREE.Vector3; look: THREE.Vector3 } | null>(null);
-  const camLook = useRef(new THREE.Vector3(0, 0.35, 0));
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-
-    const stage = params.get('stage') as Stage | null;
-    const instant = params.get('instant');
-    if (stage && STAGE_BLEND[stage]) {
-      target.current = [...STAGE_BLEND[stage]];
-      if (instant !== '0') {
-        cur.current = [...STAGE_BLEND[stage]];
-        snap.current = true;
-      }
-    }
-
-    const applyCam = (name: string) => {
-      const preset = CAM_PRESETS[name] ?? CAM_PRESETS.default;
-      camTarget.current = {
-        pos: new THREE.Vector3(...preset[0]),
-        look: new THREE.Vector3(...preset[1]),
-      };
-      // snap the camera on explicit preset request
-      camera.position.set(...preset[0]);
-      camLook.current.set(...preset[1]);
-      camera.lookAt(camLook.current);
-    };
-    const cam = params.get('cam');
-    if (cam) applyCam(cam);
-
-    const onKey = (e: KeyboardEvent) => {
-      switch (e.key) {
-        case '1':
-          target.current = [...STAGE_BLEND.wire];
-          break;
-        case '2':
-          target.current = [...STAGE_BLEND.clay];
-          break;
-        case '3':
-          target.current = [...STAGE_BLEND.gloss];
-          break;
-        case '4':
-          target.current = [...STAGE_BLEND.lights];
-          break;
-        case '5':
-          applyCam('default');
-          break;
-        case '6':
-          applyCam('front');
-          break;
-        case '7':
-          applyCam('rear');
-          break;
-        case '8':
-          applyCam('side');
-          break;
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [camera]);
-
-  useFrame((_, dt) => {
-    const rig = carRef.current;
-    if (!rig) return;
-    const c = cur.current;
-    const t = target.current;
-    const k = snap.current ? 1 : 1 - Math.pow(0.001, dt); // ~fast ease
-    snap.current = false;
-    c[0] += (t[0] - c[0]) * k;
-    c[1] += (t[1] - c[1]) * k;
-    c[2] += (t[2] - c[2]) * k;
-    rig.setBlend(c[0], c[1]);
-    rig.setLights(c[2]);
-  });
-
-  return null;
 }
