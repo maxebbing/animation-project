@@ -1,48 +1,63 @@
 'use client';
 
-import { forwardRef, useEffect, useMemo, useRef } from 'react';
+import {
+  forwardRef,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
-import type { Group } from 'three';
 import type { ThreeElements } from '@react-three/fiber';
+import { buildCarRig, type CarRig } from './useCarMaterials';
 
 const MODEL_PATH = '/models/car.glb';
 
+function setRef(ref: React.ForwardedRef<CarRig>, value: CarRig | null) {
+  if (typeof ref === 'function') ref(value);
+  else if (ref) ref.current = value;
+}
+
 /**
- * Loads the car glTF, centers it at the origin so it sits on y=0, and forwards
- * a ref to the wrapping group so later passes (art direction, choreography)
- * can reach into the scene graph (named nodes/materials) via userData or
- * traversal from the ref.
+ * Loads the car glTF, centres it at the origin (resting on y=0), builds the
+ * imperative material rig (wireframe / clay / gloss + light ignition) and
+ * forwards a {@link CarRig} ref so later passes (dev harness now, GSAP
+ * choreography in M3) can scrub the material acts at 60fps.
+ *
+ * The rig is built in a layout effect on a *fresh* clone that is then the exact
+ * object rendered — so StrictMode's double-invoke and HMR can never leave the
+ * driven rig pointing at a different material set than the one on screen.
  */
-const CarModel = forwardRef<Group, ThreeElements['group']>(
+const CarModel = forwardRef<CarRig, ThreeElements['group']>(
   function CarModel(props, ref) {
     const { scene } = useGLTF(MODEL_PATH);
-    const innerRef = useRef<THREE.Group>(null);
+    const groupRef = useRef<THREE.Group>(null);
+    // The prepared (cloned + rigged) scene actually rendered.
+    const [prepared, setPrepared] = useState<THREE.Object3D | null>(null);
 
-    // Clone once so hot-reloads / multiple instances don't share transforms.
-    const clonedScene = useMemo(() => scene.clone(true), [scene]);
+    useLayoutEffect(() => {
+      const cloned = scene.clone(true);
 
-    useEffect(() => {
-      const target = innerRef.current;
-      if (!target) return;
-
-      // Compute bounding box of the loaded model and re-center it so the
-      // model's horizontal center sits at x=0/z=0 and its lowest point sits
-      // at y=0 (resting on the "ground").
-      const box = new THREE.Box3().setFromObject(clonedScene);
+      // Re-centre: horizontal centre at x/z = 0, lowest point at y = 0.
+      const box = new THREE.Box3().setFromObject(cloned);
       const center = box.getCenter(new THREE.Vector3());
-      const min = box.min;
+      cloned.position.x -= center.x;
+      cloned.position.z -= center.z;
+      cloned.position.y -= box.min.y;
 
-      clonedScene.position.x -= center.x;
-      clonedScene.position.z -= center.z;
-      clonedScene.position.y -= min.y;
-    }, [clonedScene]);
+      const rig = buildCarRig(cloned, groupRef.current ?? new THREE.Group());
+      setPrepared(cloned);
+      setRef(ref, rig);
+
+      return () => {
+        setRef(ref, null);
+        rig.dispose();
+      };
+    }, [scene, ref]);
 
     return (
-      <group ref={ref} {...props}>
-        <group ref={innerRef}>
-          <primitive object={clonedScene} />
-        </group>
+      <group ref={groupRef} {...props}>
+        {prepared && <primitive object={prepared} />}
       </group>
     );
   }

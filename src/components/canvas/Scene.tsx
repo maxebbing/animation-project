@@ -1,36 +1,288 @@
 'use client';
 
-import { Suspense } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { Environment } from '@react-three/drei';
+import { Suspense, useEffect, useRef } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import {
+  Environment,
+  Lightformer,
+  ContactShadows,
+} from '@react-three/drei';
+import {
+  EffectComposer,
+  Bloom,
+  Vignette,
+  Noise,
+} from '@react-three/postprocessing';
+import { BlendFunction } from 'postprocessing';
+import * as THREE from 'three';
 import CarModel from './CarModel';
+import type { CarRig } from './useCarMaterials';
 
 /**
- * Fixed full-viewport background canvas. Sits behind the scrollable DOM
- * content (see src/app/page.tsx) so the 3D scene reads as a persistent
- * backdrop while sections scroll over it.
+ * Fixed full-viewport background canvas — the persistent cinematic backdrop
+ * behind the scrollable DOM content (see src/app/page.tsx).
  *
- * Lighting/environment here are placeholders only — the art-direction pass
- * (M2) replaces the single directional light and city preset with real
- * lighting and a proper HDRI/studio setup.
+ * M2 art direction:
+ *  - dark studio "void" lighting rig (Lightformer env for specular streaks on
+ *    paint, key + cool rim + soft fill real lights, ContactShadows to ground)
+ *  - three material acts driven imperatively via the CarRig ref
+ *  - tasteful post grade (thresholded Bloom, subtle Vignette + film grain)
  */
 export default function Scene() {
+  const carRef = useRef<CarRig>(null);
+
   return (
     <div className="fixed inset-0 z-0">
       <Canvas
         dpr={[1, 2]}
-        gl={{ antialias: true }}
-        camera={{ fov: 35, position: [4.5, 1.3, 4.5] }}
-        onCreated={({ camera }) => {
-          camera.lookAt(0, 0, 0);
+        gl={{ antialias: true, toneMappingExposure: 1.05 }}
+        camera={{ fov: 33, position: [4.6, 1.25, 4.9] }}
+        onCreated={({ camera, gl }) => {
+          camera.lookAt(0, 0.35, 0);
+          gl.toneMapping = THREE.ACESFilmicToneMapping;
         }}
       >
         <Suspense fallback={null}>
-          <Environment preset="city" />
-          <directionalLight position={[5, 8, 5]} intensity={1.2} />
-          <CarModel />
+          <StudioLighting />
+          <CarModel ref={carRef} />
+          <ContactShadows
+            position={[0, 0.001, 0]}
+            scale={12}
+            far={4}
+            blur={3.2}
+            opacity={0.78}
+            color="#000000"
+            resolution={1024}
+          />
+          <Grade />
         </Suspense>
+
+        {/* DEV-ONLY harness — removed in the M3 choreography milestone. */}
+        <DevHarness carRef={carRef} />
       </Canvas>
     </div>
   );
+}
+
+/**
+ * Dark expensive studio: an <Environment> full of Lightformers paints the
+ * crisp reflection streaks the paint needs, while a few real lights carve the
+ * silhouette out of the #0a0a0a void.
+ */
+function StudioLighting() {
+  return (
+    <>
+      <color attach="background" args={['#0a0a0a']} />
+      {/* faint ambient so the shadow side never goes fully dead */}
+      <ambientLight intensity={0.12} color="#20304a" />
+
+      {/* KEY — strong, slightly warm, high and to camera-left */}
+      <spotLight
+        position={[6, 9, 4]}
+        angle={0.5}
+        penumbra={0.9}
+        intensity={140}
+        distance={40}
+        color="#fff4e6"
+      />
+      {/* COOL RIM — behind/right, draws the edge against black */}
+      <directionalLight position={[-7, 4, -6]} intensity={2.2} color="#7fb2ff" />
+      {/* SOFT FILL — low, front, cool and gentle */}
+      <directionalLight position={[0, 2, 8]} intensity={0.5} color="#8ea6c8" />
+
+      <Environment resolution={256} frames={1} background={false}>
+        {/* dim base so the env isn't pure black (kills totally dead reflections) */}
+        <color attach="background" args={['#050608']} />
+
+        {/* big soft top strip — the primary specular sweep across the roof */}
+        <Lightformer
+          form="rect"
+          intensity={2.3}
+          color="#eaf2ff"
+          position={[0, 6, 1]}
+          rotation={[Math.PI / 2, 0, 0]}
+          scale={[10, 6, 1]}
+        />
+        {/* long vertical streaks down each flank — the "expensive" body line */}
+        <Lightformer
+          form="rect"
+          intensity={3.4}
+          color="#dce8ff"
+          position={[6, 2.2, 1]}
+          rotation={[0, -Math.PI / 2, 0]}
+          scale={[9, 2.6, 1]}
+        />
+        {/* lower flank sliver — gives the doors/sills a graded reflection */}
+        <Lightformer
+          form="rect"
+          intensity={2.2}
+          color="#bcd2ff"
+          position={[5.5, 0.4, 0]}
+          rotation={[0, -Math.PI / 2, 0]}
+          scale={[10, 0.7, 1]}
+        />
+        <Lightformer
+          form="rect"
+          intensity={2.4}
+          color="#cfe0ff"
+          position={[-6, 2, -1]}
+          rotation={[0, Math.PI / 2, 0]}
+          scale={[9, 2.2, 1]}
+        />
+        {/* warm kicker from front-left for a hint of colour in the highlights */}
+        <Lightformer
+          form="rect"
+          intensity={1.6}
+          color="#ffd9a8"
+          position={[-3, 1, 6]}
+          rotation={[0, 0, 0]}
+          scale={[4, 3, 1]}
+        />
+        {/* tight bar for a hot chrome/edge glint (kept controlled) */}
+        <Lightformer
+          form="rect"
+          intensity={3.4}
+          color="#ffffff"
+          position={[2, 4, -5]}
+          rotation={[0, Math.PI, 0]}
+          scale={[2.4, 0.35, 1]}
+        />
+      </Environment>
+    </>
+  );
+}
+
+/**
+ * Post grade. Bloom is thresholded so ONLY hot speculars and the ignited
+ * emissives blow out — the body paint stays controlled. Vignette + a whisper
+ * of film grain finish the cinematic look.
+ */
+function Grade() {
+  return (
+    <EffectComposer multisampling={4}>
+      <Bloom
+        mipmapBlur
+        intensity={0.7}
+        luminanceThreshold={0.95}
+        luminanceSmoothing={0.22}
+        radius={0.7}
+      />
+      <Vignette eskil={false} offset={0.28} darkness={0.72} />
+      <Noise
+        premultiply
+        blendFunction={BlendFunction.OVERLAY}
+        opacity={0.05}
+      />
+    </EffectComposer>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DEV-ONLY verification harness. REMOVE in M3 (choreography owns these values).
+//
+//   ?stage=wire|clay|gloss|lights   set an act (instant on load)
+//   ?cam=default|front|rear|side     camera preset
+//   ?instant=1                       snap instead of easing
+//   keys 1/2/3/4                      wire / clay / gloss / lights (eased)
+//   keys 5/6/7/8                      camera default / front / rear / side
+// ---------------------------------------------------------------------------
+type Stage = 'wire' | 'clay' | 'gloss' | 'lights';
+const STAGE_BLEND: Record<Stage, [number, number, number]> = {
+  // [wireframeToClay, clayToGloss, lights]
+  wire: [0, 0, 0],
+  clay: [1, 0, 0],
+  gloss: [1, 1, 0],
+  lights: [1, 1, 1],
+};
+const CAM_PRESETS: Record<string, [THREE.Vector3Tuple, THREE.Vector3Tuple]> = {
+  // [position, lookAt]
+  default: [[4.6, 1.25, 4.9], [0, 0.35, 0]],
+  front: [[2.9, 0.82, -5.2], [0, 0.52, 0]],
+  rear: [[4.6, 1.2, 5.2], [0, 0.5, 0]],
+  side: [[7.2, 1.0, 0.4], [0, 0.4, 0]],
+};
+
+function DevHarness({ carRef }: { carRef: React.RefObject<CarRig | null> }) {
+  const { camera } = useThree();
+  const cur = useRef<[number, number, number]>([1, 1, 0]);
+  const target = useRef<[number, number, number]>([1, 1, 0]);
+  const snap = useRef(false);
+  const camTarget = useRef<{ pos: THREE.Vector3; look: THREE.Vector3 } | null>(null);
+  const camLook = useRef(new THREE.Vector3(0, 0.35, 0));
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+
+    const stage = params.get('stage') as Stage | null;
+    const instant = params.get('instant');
+    if (stage && STAGE_BLEND[stage]) {
+      target.current = [...STAGE_BLEND[stage]];
+      if (instant !== '0') {
+        cur.current = [...STAGE_BLEND[stage]];
+        snap.current = true;
+      }
+    }
+
+    const applyCam = (name: string) => {
+      const preset = CAM_PRESETS[name] ?? CAM_PRESETS.default;
+      camTarget.current = {
+        pos: new THREE.Vector3(...preset[0]),
+        look: new THREE.Vector3(...preset[1]),
+      };
+      // snap the camera on explicit preset request
+      camera.position.set(...preset[0]);
+      camLook.current.set(...preset[1]);
+      camera.lookAt(camLook.current);
+    };
+    const cam = params.get('cam');
+    if (cam) applyCam(cam);
+
+    const onKey = (e: KeyboardEvent) => {
+      switch (e.key) {
+        case '1':
+          target.current = [...STAGE_BLEND.wire];
+          break;
+        case '2':
+          target.current = [...STAGE_BLEND.clay];
+          break;
+        case '3':
+          target.current = [...STAGE_BLEND.gloss];
+          break;
+        case '4':
+          target.current = [...STAGE_BLEND.lights];
+          break;
+        case '5':
+          applyCam('default');
+          break;
+        case '6':
+          applyCam('front');
+          break;
+        case '7':
+          applyCam('rear');
+          break;
+        case '8':
+          applyCam('side');
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [camera]);
+
+  useFrame((_, dt) => {
+    const rig = carRef.current;
+    if (!rig) return;
+    const c = cur.current;
+    const t = target.current;
+    const k = snap.current ? 1 : 1 - Math.pow(0.001, dt); // ~fast ease
+    snap.current = false;
+    c[0] += (t[0] - c[0]) * k;
+    c[1] += (t[1] - c[1]) * k;
+    c[2] += (t[2] - c[2]) * k;
+    rig.setBlend(c[0], c[1]);
+    rig.setLights(c[2]);
+  });
+
+  return null;
 }
