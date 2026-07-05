@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { getLenis } from './ScrollRig';
 
 /**
  * Fixed editorial chrome that lives above the cinematic canvas: the wordmark,
@@ -42,6 +43,22 @@ export default function SiteChrome() {
     };
   }, []);
 
+  const handleAnchorClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    const href = e.currentTarget.getAttribute('href');
+    if (!href || !href.startsWith('#')) return;
+    const target = document.querySelector(href);
+    if (!target) return;
+
+    e.preventDefault();
+    const lenis = getLenis();
+    if (lenis) {
+      lenis.scrollTo(target as HTMLElement);
+    } else {
+      // reduced-motion / Lenis disabled: fall back to native smooth scroll
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   return (
     <header className="pointer-events-none fixed inset-x-0 top-0 z-50">
       {/* scrim so the bar reads over bright bloom frames */}
@@ -50,6 +67,7 @@ export default function SiteChrome() {
       <nav className="mx-auto flex max-w-[1600px] items-center justify-between px-[6vw] py-5">
         <a
           href="#hero"
+          onClick={handleAnchorClick}
           className="pointer-events-auto font-mono text-[0.82rem] font-medium uppercase tracking-[0.42em] text-foreground transition-opacity hover:opacity-70"
         >
           Marque
@@ -60,6 +78,7 @@ export default function SiteChrome() {
             <a
               key={item.href}
               href={item.href}
+              onClick={handleAnchorClick}
               className="pointer-events-auto hidden transition-colors hover:text-foreground sm:inline"
             >
               {item.label}
@@ -67,6 +86,7 @@ export default function SiteChrome() {
           ))}
           <a
             href="#cta"
+            onClick={handleAnchorClick}
             className="pointer-events-auto rounded-full border border-foreground/25 px-4 py-1.5 text-foreground/90 transition-colors hover:border-accent hover:text-accent"
           >
             Start a project

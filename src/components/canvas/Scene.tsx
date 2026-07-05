@@ -54,6 +54,7 @@ export default function Scene() {
             opacity={0.78}
             color="#000000"
             resolution={1024}
+            frames={1}
           />
           <Grade />
           {/* the master scroll-scrubbed cinematic: drives camera + CarRig */}

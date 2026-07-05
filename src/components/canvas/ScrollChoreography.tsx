@@ -87,8 +87,55 @@ export default function ScrollChoreography({
     baseSpin: new WeakMap<THREE.Object3D, number>(),
   });
 
+  // prefers-reduced-motion: no scrubbed camera move and no idle "breathe" —
+  // read once on mount (SSR-safe: this component only ever runs client-side).
+  const reducedRef = useRef(false);
+
   useLayoutEffect(() => {
     const cam = proxyRef.current;
+    const prefersReduced = window.matchMedia(
+      '(prefers-reduced-motion: reduce)'
+    ).matches;
+    reducedRef.current = prefersReduced;
+
+    if (prefersReduced) {
+      // Skip the scrubbed timeline entirely: jump straight to the finished
+      // gloss car, lights ignited, on a single static flattering frame (the
+      // wide high front-3/4 the choreography otherwise arrives at during the
+      // gloss beat). The DOM copy sections still fade in/out on their own
+      // independent ScrollTriggers (see EditorialSections) — only the 3D
+      // camera/material scrub is suppressed here.
+      Object.assign(cam, {
+        px: 5.9,
+        py: 2.0,
+        pz: -4.7,
+        tx: 0,
+        ty: 0.62,
+        tz: 0,
+        bias: 0.5,
+        vbias: 0,
+        w2c: 1,
+        c2g: 1,
+        lights: 1,
+        spin: 0,
+      });
+
+      const rig = carRef.current;
+      if (rig) {
+        rig.setBlend(1, 1);
+        rig.setLights(1);
+      }
+
+      if (process.env.NODE_ENV !== 'production') {
+        const w = window as unknown as Record<string, unknown>;
+        w.__cam = camera;
+        w.__proxy = cam;
+        w.__carRef = carRef;
+      }
+
+      return;
+    }
+
     const ctx = gsap.context(() => {
       const tl = gsap.timeline({
         defaults: { ease: 'none' },
@@ -241,9 +288,13 @@ export default function ScrollChoreography({
     s.pos.set(cam.px, cam.py, cam.pz);
     s.tgt.set(cam.tx, cam.ty, cam.tz);
 
-    // idle "breathe" — a tiny continuous drone hover so even a still frame lives
-    s.pos.x += Math.cos(t * 0.27) * 0.05;
-    s.pos.y += Math.sin(t * 0.35) * 0.05;
+    // idle "breathe" — a tiny continuous drone hover so even a still frame
+    // lives. Suppressed under prefers-reduced-motion: the reduced frame must
+    // be genuinely static, not just un-scrubbed.
+    if (!reducedRef.current) {
+      s.pos.x += Math.cos(t * 0.27) * 0.05;
+      s.pos.y += Math.sin(t * 0.35) * 0.05;
+    }
 
     // off-centre framing: shift the look target laterally so the car sits in a
     // third of the frame, leaving negative space for the editorial copy.

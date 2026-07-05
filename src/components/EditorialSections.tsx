@@ -54,15 +54,38 @@ const VALIGN: Record<string, string> = {
 // A soft directional scrim behind the copy so type stays legible over the
 // brightest frames of the car without ever reading as a hard panel. Anchored
 // to the copy side and fully transparent well before the car's hero side.
+// Desktop-only (sm and up) — on narrow viewports the car spans the full
+// width behind the copy, so a side gradient leaves most of the text
+// unscrimmed; MOBILE_SCRIM below covers that case instead.
 const SCRIM: Record<string, string> = {
   blueprint:
-    'absolute inset-y-0 right-0 w-[70%] bg-[linear-gradient(to_left,rgba(10,10,10,0.92)_0%,rgba(10,10,10,0.66)_38%,transparent_72%)]',
-  clay: 'absolute inset-y-0 left-0 w-[64%] bg-[linear-gradient(to_right,rgba(10,10,10,0.82)_0%,rgba(10,10,10,0.5)_34%,transparent_64%)]',
+    'absolute inset-y-0 right-0 hidden w-[70%] bg-[linear-gradient(to_left,rgba(10,10,10,0.92)_0%,rgba(10,10,10,0.66)_38%,transparent_72%)] sm:block',
+  clay: 'absolute inset-y-0 left-0 hidden w-[64%] bg-[linear-gradient(to_right,rgba(10,10,10,0.82)_0%,rgba(10,10,10,0.5)_34%,transparent_64%)] sm:block',
   gloss:
-    'absolute inset-y-0 right-0 w-[64%] bg-[linear-gradient(to_left,rgba(10,10,10,0.82)_0%,rgba(10,10,10,0.5)_34%,transparent_64%)]',
+    'absolute inset-y-0 right-0 hidden w-[64%] bg-[linear-gradient(to_left,rgba(10,10,10,0.82)_0%,rgba(10,10,10,0.5)_34%,transparent_64%)] sm:block',
   orbit:
-    'absolute inset-y-0 left-0 w-[66%] bg-[linear-gradient(to_right,rgba(10,10,10,0.84)_0%,rgba(10,10,10,0.52)_36%,transparent_66%)]',
+    'absolute inset-y-0 left-0 hidden w-[58%] bg-[linear-gradient(to_right,rgba(10,10,10,0.9)_0%,rgba(10,10,10,0.68)_46%,transparent_82%)] sm:block',
   cta: 'absolute inset-0 bg-[radial-gradient(62%_46%_at_50%_40%,rgba(10,10,10,0.66)_0%,transparent_72%)]',
+};
+
+// Mobile-only (< sm) full-width, bottom-anchored scrims. Below ~640px the
+// car fills the frame edge-to-edge behind the copy, so a full-bleed scrim
+// anchored to whichever edge the copy sits near reads better than a side
+// gradient — it's the one place a flatter panel is the right call rather
+// than the desktop's soft directional wash.
+// Full section height, single smooth fade from the copy's edge all the way
+// to the opposite edge (no early "transparent" stop) — a hard cutoff partway
+// up previously left the tail of each block (support copy / list items)
+// sitting in an already-transparent zone. See M5 report.
+const MOBILE_SCRIM: Record<string, string> = {
+  hero: 'absolute inset-x-0 bottom-0 h-full bg-[linear-gradient(to_top,rgba(10,10,10,0.92)_0%,rgba(10,10,10,0.62)_42%,transparent_100%)] sm:hidden',
+  blueprint:
+    'absolute inset-x-0 top-0 h-full bg-[linear-gradient(to_bottom,rgba(10,10,10,0.94)_0%,rgba(10,10,10,0.66)_46%,transparent_100%)] sm:hidden',
+  clay: 'absolute inset-x-0 bottom-0 h-full bg-[linear-gradient(to_top,rgba(10,10,10,0.94)_0%,rgba(10,10,10,0.66)_46%,transparent_100%)] sm:hidden',
+  gloss:
+    'absolute inset-x-0 bottom-0 h-full bg-[linear-gradient(to_top,rgba(10,10,10,0.9)_0%,rgba(10,10,10,0.58)_42%,transparent_100%)] sm:hidden',
+  orbit:
+    'absolute inset-x-0 top-0 h-full bg-[linear-gradient(to_bottom,rgba(10,10,10,0.95)_0%,rgba(10,10,10,0.7)_50%,transparent_100%)] sm:hidden',
 };
 
 // --- shared editorial atoms ------------------------------------------------
@@ -146,14 +169,18 @@ const SERVICES = [
 
 function OrbitContent() {
   return (
-    <div data-reveal className="max-w-[40rem]">
+    <div data-reveal className="max-w-[27rem]">
       <Kicker>Capabilities</Kicker>
       <h2 className="font-display text-[clamp(2.2rem,4.4vw,3.6rem)] font-normal leading-[1.03] tracking-[-0.01em] text-foreground">
         End to end,
         <br />
         under one roof.
       </h2>
-      <ul className="mt-9 grid grid-cols-1 gap-x-10 gap-y-3 font-mono text-[0.82rem] tracking-tight text-foreground/80 sm:grid-cols-2">
+      {/* Single column, kept narrow — the orbit camera sweeps close over the
+          car's front wheel/body during this scene's copy peak, so the list
+          stays inside the strong part of the local scrim rather than
+          spreading into a second column that would sit on the car. */}
+      <ul className="mt-9 grid grid-cols-1 gap-y-3 font-mono text-[0.82rem] tracking-tight text-foreground/80">
         {SERVICES.map((s, i) => (
           <li
             key={s}
@@ -197,8 +224,8 @@ function CtaContent() {
       </a>
 
       <footer className="mt-24 flex flex-col items-center gap-4 text-center font-mono text-[0.64rem] uppercase tracking-[0.22em] text-foreground/40">
-        <div className="flex items-center gap-5">
-          <span>© 2026 Marque</span>
+        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+          <span className="whitespace-nowrap">© 2026 Marque</span>
           <span className="text-foreground/20">·</span>
           <a
             href="#"
@@ -311,6 +338,7 @@ export default function EditorialSections() {
             } ${JUSTIFY[align]}`}
           >
             {SCRIM[id] && <div aria-hidden className={SCRIM[id]} />}
+            {MOBILE_SCRIM[id] && <div aria-hidden className={MOBILE_SCRIM[id]} />}
             <SectionContent id={id} align={align} />
           </div>
         </section>
